@@ -151,6 +151,14 @@
             const leftBtn = document.getElementById('left-btn');
             const rightBtn = document.getElementById('right-btn');
             const jumpBtn = document.getElementById('jump-btn');
+
+            // Debug info UI
+            let debugDisplay = document.getElementById('debug-info');
+            // Power-up UI
+            let powerupDisplay = document.getElementById('powerup');
+            // Power-up debug state
+            let starSpawnCoords = null;
+            let starCollectedTime = null;
             
             // Game state
             let score = 0;
@@ -171,6 +179,10 @@
                 right: false,
                 up: false
             };
+            // Power-up state
+            let star = null;
+            let starActive = false;
+            let starTimer = null;
             
             // Game dimensions
             const containerWidth = gameContainer.offsetWidth;
@@ -187,6 +199,39 @@
                 playerVelocityY = 0;
                 playerVelocityX = 0;
                 updatePlayerPosition();
+
+                // Debug info UI setup
+                if (!debugDisplay) {
+                    debugDisplay = document.createElement('div');
+                    debugDisplay.id = 'debug-info';
+                    debugDisplay.style.position = 'absolute';
+                    debugDisplay.style.bottom = '10px';
+                    debugDisplay.style.left = '20px';
+                    debugDisplay.style.background = 'rgba(0,0,0,0.7)';
+                    debugDisplay.style.color = 'lime';
+                    debugDisplay.style.fontSize = '0.95rem';
+                    debugDisplay.style.padding = '8px 12px';
+                    debugDisplay.style.borderRadius = '8px';
+                    debugDisplay.style.zIndex = '100';
+                    debugDisplay.style.fontFamily = 'monospace';
+                    gameContainer.appendChild(debugDisplay);
+                }
+                debugDisplay.textContent = '';
+
+                // Power-up UI setup
+                if (!powerupDisplay) {
+                    powerupDisplay = document.createElement('div');
+                    powerupDisplay.id = 'powerup';
+                    powerupDisplay.style.position = 'absolute';
+                    powerupDisplay.style.top = '10px';
+                    powerupDisplay.style.right = '20px';
+                    powerupDisplay.style.color = 'yellow';
+                    powerupDisplay.style.fontWeight = 'bold';
+                    powerupDisplay.style.fontSize = '1.2rem';
+                    powerupDisplay.style.zIndex = '50';
+                    gameContainer.appendChild(powerupDisplay);
+                }
+                powerupDisplay.textContent = '';
                 
                 // Create platforms
                 createPlatform(0, containerHeight - 50, containerWidth, 50); // Ground
@@ -215,7 +260,40 @@
                 gameOver = false;
                 gameRunning = false;
             }
-            
+
+            // Create star power-up
+            function createStar(x, y) {
+                if (star) star.remove();
+                star = document.createElement('div');
+                star.className = 'star';
+                star.style.position = 'absolute';
+                star.style.width = '32px';
+                star.style.height = '32px';
+                star.style.left = x + 'px';
+                star.style.top = y + 'px';
+                star.style.backgroundImage = "url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><polygon points=\"32,4 39,24 60,24 42,38 48,58 32,46 16,58 22,38 4,24 25,24\" fill=\"%23FFD700\" stroke=\"%23FFA000\" stroke-width=\"3\"/></svg>')";
+                star.style.backgroundRepeat = 'no-repeat';
+                star.style.zIndex = '20';
+                star.style.animation = 'spin 1.5s linear infinite';
+                gameContainer.appendChild(star);
+                starSpawnCoords = { x, y };
+            }
+
+            // Activate star power-up
+            function activateStar() {
+                starActive = true;
+                player.style.filter = 'drop-shadow(0 0 10px gold) brightness(1.5)';
+                powerupDisplay.textContent = 'Invincible!';
+                if (starTimer) clearTimeout(starTimer);
+                starCollectedTime = Date.now();
+                starTimer = setTimeout(() => {
+                    starActive = false;
+                    player.style.filter = '';
+                    powerupDisplay.textContent = '';
+                    starCollectedTime = null;
+                }, 5000);
+            }
+
             function clearGameElements() {
                 // Remove all platforms, coins, and enemies
                 document.querySelectorAll('.platform, .coin, .enemy').forEach(el => el.remove());
@@ -282,6 +360,21 @@
             }
             
             function updatePlayerPosition() {
+                // Check star collision
+                if (star && !starActive) {
+                    const starRect = star.getBoundingClientRect();
+                    const playerRect = player.getBoundingClientRect();
+                    if (
+                        playerRect.left < starRect.right &&
+                        playerRect.right > starRect.left &&
+                        playerRect.top < starRect.bottom &&
+                        playerRect.bottom > starRect.top
+                    ) {
+                        activateStar();
+                        star.remove();
+                        star = null;
+                    }
+                }
                 player.style.left = `${playerX}px`;
                 player.style.top = `${playerY}px`;
             }
@@ -295,6 +388,24 @@
             }
             
             function checkCollisions() {
+                // If starActive, defeat enemies on contact
+                if (starActive) {
+                    enemies.forEach((enemy, idx) => {
+                        const enemyRect = enemy.element.getBoundingClientRect();
+                        const playerRect = player.getBoundingClientRect();
+                        if (
+                            playerRect.left < enemyRect.right &&
+                            playerRect.right > enemyRect.left &&
+                            playerRect.top < enemyRect.bottom &&
+                            playerRect.bottom > enemyRect.top
+                        ) {
+                            enemy.element.remove();
+                            enemies.splice(idx, 1);
+                            score += 100;
+                            updateScore();
+                        }
+                    });
+                }
                 // Check if player is on a platform
                 let onPlatform = false;
                 for (const platform of platforms) {
@@ -332,34 +443,36 @@
                     }
                 }
                 
-                // Check enemy collisions
-                for (const enemy of enemies) {
-                    if (
-                        playerX + 40 > enemy.x && 
-                        playerX < enemy.x + enemy.width &&
-                        playerY + 50 > enemy.y && 
-                        playerY < enemy.y + enemy.height
-                    ) {
-                        // If player is falling onto enemy from above
-                        if (playerVelocityY > 0 && playerY + 40 < enemy.y) {
-                            // Defeat enemy
-                            enemy.element.remove();
-                            enemies = enemies.filter(e => e !== enemy);
-                            playerVelocityY = -10; // Bounce
-                            score += 20;
-                            updateScore();
-                        } else {
-                            // Player hit by enemy
-                            lives--;
-                            updateLives();
-                            if (lives <= 0) {
-                                endGame();
+                // Check enemy collisions (only if not invincible from star)
+                if (!starActive) {
+                    for (const enemy of enemies) {
+                        if (
+                            playerX + 40 > enemy.x &&
+                            playerX < enemy.x + enemy.width &&
+                            playerY + 50 > enemy.y &&
+                            playerY < enemy.y + enemy.height
+                        ) {
+                            // If player is falling onto enemy from above
+                            if (playerVelocityY > 0 && playerY + 40 < enemy.y) {
+                                // Defeat enemy
+                                enemy.element.remove();
+                                enemies = enemies.filter(e => e !== enemy);
+                                playerVelocityY = -10; // Bounce
+                                score += 20;
+                                updateScore();
                             } else {
-                                // Respawn player
-                                playerX = 50;
-                                playerY = containerHeight - 150;
-                                playerVelocityY = 0;
-                                playerVelocityX = 0;
+                                // Player hit by enemy
+                                lives--;
+                                updateLives();
+                                if (lives <= 0) {
+                                    endGame();
+                                } else {
+                                    // Respawn player
+                                    playerX = 50;
+                                    playerY = containerHeight - 150;
+                                    playerVelocityY = 0;
+                                    playerVelocityX = 0;
+                                }
                             }
                         }
                     }
@@ -416,6 +529,15 @@
             }
             
             function gameLoop() {
+                // Randomly spawn star on a platform every 15 seconds if not active
+                if (!star && !starActive && Math.random() < 0.001) {
+                    if (platforms.length > 0) {
+                        const plat = platforms[Math.floor(Math.random() * platforms.length)];
+                        const x = plat.x + plat.width / 2 - 16;
+                        const y = plat.y - 32;
+                        createStar(x, y);
+                    }
+                }
                 if (!gameRunning || gameOver) return;
                 
                 // Apply horizontal movement
@@ -435,6 +557,21 @@
                 
                 // Update player position on screen
                 updatePlayerPosition();
+
+                // Update debug info
+                let starStatus = starActive ? 'Active' : (star ? 'Present' : 'None');
+                let starCoords = starSpawnCoords ? `(${starSpawnCoords.x}, ${starSpawnCoords.y})` : 'N/A';
+                let invTime = starActive && starCollectedTime ? `${((5000 - (Date.now() - starCollectedTime))/1000).toFixed(2)}s` : '0.00s';
+                let lastCollected = starCollectedTime ? new Date(starCollectedTime).toLocaleTimeString() : 'Never';
+                debugDisplay.textContent =
+                    `Player: (${Math.round(playerX)}, ${Math.round(playerY)})\n` +
+                    `Velocity: (${playerVelocityX.toFixed(2)}, ${playerVelocityY.toFixed(2)})\n` +
+                    `Star Status: ${starStatus}\n` +
+                    `Star Coords: ${starCoords}\n` +
+                    `Invincibility Time Left: ${invTime}\n` +
+                    `Last Star Collected: ${lastCollected}\n` +
+                    `Enemies: ${enemies.length}`;
+                if (!star) starSpawnCoords = null;
                 
                 // Continue game loop
                 requestAnimationFrame(gameLoop);
